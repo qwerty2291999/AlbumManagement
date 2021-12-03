@@ -7,8 +7,10 @@ import { Repository } from 'typeorm';
 import { Album } from './album.entity';
 import { CreateAlbum } from './dto/create-album.dto';
 import { Transfer } from './dto/transfer.dto';
-import { AddUser } from './interface';
+import { AddUser, Message } from './interface';
 import { DeleteAlbumPhotos } from './dto/delete-album-photos';
+import { AlbumTransfer, STATUS } from './album-transfer.entity';
+import { TransferAction } from './dto/transfer-action.dto';
 
 @Injectable()
 export class AlbumService {
@@ -16,6 +18,8 @@ export class AlbumService {
     @InjectRepository(Album) private albumRepository: Repository<Album>,
     @InjectRepository(User) private userRepository: Repository<User>,
     @InjectRepository(Photo) private photoRepository: Repository<Photo>,
+    @InjectRepository(AlbumTransfer)
+    private albumTransferRepository: Repository<AlbumTransfer>,
   ) {}
   async createAlbum(id: number, createAlbum: CreateAlbum): Promise<Album> {
     const album = new Album();
@@ -206,7 +210,7 @@ export class AlbumService {
         throw new HttpException({ message: e.message }, e.status);
       });
   }
-  async transfer(transfer: Transfer): Promise<Album> {
+  async transfer(transfer: Transfer): Promise<any> {
     const send = await this.albumRepository.findOne({
       relations: ['photos'],
       where: { id: transfer.send },
@@ -215,11 +219,38 @@ export class AlbumService {
       relations: ['photos'],
       where: { id: transfer.get },
     });
-    const newGet = get.photos.concat(send.photos);
-    send.photos = [];
-    get.photos = newGet;
-    await this.albumRepository.save(send);
-    return await this.albumRepository.save(get);
+    if (send.userId === get.userId) {
+      const newGet = get.photos.concat(send.photos);
+      send.photos = [];
+      get.photos = newGet;
+      await this.albumRepository.save(send);
+      return await this.albumRepository.save(get);
+    }
+    const requestData = new AlbumTransfer();
+    requestData.sendUserId = send.userId;
+    requestData.getUserId = get.userId;
+    requestData.sendId = send.id;
+    requestData.getId = get.id;
+    await this.albumTransferRepository
+      .findOne({
+        where: { sendId: requestData.sendId, getId: requestData.getId },
+      })
+      .then((r) => {
+        if (r) {
+          throw new HttpException(
+            { message: 'Transfer is already requested' },
+            400,
+          );
+        }
+      })
+      .catch((e) => {
+        throw new HttpException({ message: e.message }, e.status);
+      });
+    await this.albumTransferRepository.save(requestData);
+    const message: Message = {
+      message: `Created Transfer Request From ${requestData.sendId} to ${requestData.getId}`,
+    };
+    return message;
   }
   async deletePhoto(
     uid: number,
@@ -253,5 +284,51 @@ export class AlbumService {
     });
     const { users, ...newAlbum } = album;
     return await this.albumRepository.save(newAlbum);
+  }
+  async getTransferRequests(uid: number): Promise<AlbumTransfer[]> {
+    return this.albumTransferRepository.find({ where: { sendUserId: uid } });
+  }
+  async getTransferReceives(uid: number): Promise<AlbumTransfer[]> {
+    return this.albumTransferRepository.find({ where: { getUserId: uid } });
+  }
+  async getTransferReceivesActions(obj: TransferAction): Promise<any> {
+    const request = await this.albumTransferRepository
+      .findOne({
+        where: { id: obj.requestId, getUserId: obj.uid },
+      })
+      .then((r) => {
+        if (r) {
+          return r;
+        }
+        throw new HttpException('Not Found Transfer Request', 404);
+      })
+      .catch((e) => {
+        throw new HttpException({ message: e.message }, e.status);
+      });
+    const send = await this.albumRepository.findOne({
+      relations: ['photos'],
+      where: { id: request.sendId },
+    });
+    const get = await this.albumRepository.findOne({
+      relations: ['photos'],
+      where: { id: request.getId },
+    });
+    if (get.userId !== obj.uid) {
+      throw new HttpException('You are not the OWNER', 403);
+    }
+    if (obj.status === STATUS.ACCEPTED) {
+      const newGet = get.photos.concat(send.photos);
+      send.photos = [];
+      get.photos = newGet;
+      await this.albumRepository.save(send);
+      request.status = STATUS.ACCEPTED;
+      await this.albumTransferRepository.save(request);
+      get.updatedAt = new Date();
+      return await this.albumRepository.save(get);
+    }
+    const message: Message = { message: 'Rejected the request' };
+    request.status = STATUS.REJECTED;
+    await this.albumTransferRepository.save(request);
+    return message;
   }
 }

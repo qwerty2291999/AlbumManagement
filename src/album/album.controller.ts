@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseIntPipe,
   Post,
   Put,
   Request,
@@ -25,6 +26,7 @@ import { GetPhoto } from './dto/get-photo.dto';
 import { GetUser } from './dto/get-user.dto';
 import { Transfer } from './dto/transfer.dto';
 import { AddUser } from './interface';
+import { TransferAction } from './dto/transfer-action.dto';
 
 @Controller('album')
 export class AlbumController {
@@ -119,12 +121,50 @@ export class AlbumController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Transfer Photo' })
   @ApiResponse({ status: 200, description: 'Success.' })
+  @ApiResponse({ status: 400, description: 'Already have a transfer request' })
   @ApiResponse({ status: 404, description: 'Not Found album.' })
   @UseGuards(JwtAuthGuard)
   @Put('transfer')
   async transfer(@Body() transfer: Transfer): Promise<Album> {
     return await this.albumService.transfer(transfer);
   }
+  @ApiTags('Album')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Find Transfer Request' })
+  @ApiResponse({ status: 200, description: 'Success.' })
+  @UseGuards(JwtAuthGuard)
+  @Get('transfer/requests')
+  async getTransferRequest(@Request() req) {
+    return this.albumService.getTransferRequests(req.user.userId);
+  }
+  @ApiTags('Album')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Find Transfer Request' })
+  @ApiResponse({ status: 200, description: 'Success.' })
+  @UseGuards(JwtAuthGuard)
+  @Get('transfer/recieves')
+  async getTransferReceive(@Request() req) {
+    return this.albumService.getTransferReceives(req.user.userId);
+  }
+  @ApiTags('Album')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Find Transfer Request' })
+  @ApiResponse({ status: 200, description: 'Success.' })
+  @UseGuards(JwtAuthGuard)
+  @Put('transfer/recieves/:id/actions')
+  async getTransferReceiveActions(
+    @Request() req,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() { status }: TransferAction,
+  ) {
+    const obj: TransferAction = {
+      uid: req.user.userId,
+      requestId: id,
+      status,
+    };
+    return this.albumService.getTransferReceivesActions(obj);
+  }
+
   @ApiTags('Album')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Delete Photo' })
@@ -138,8 +178,6 @@ export class AlbumController {
     @Param('id') id: number,
     @Body() deletePhoto: DeleteAlbumPhotos,
   ): Promise<Album> {
-    console.log(deletePhoto);
-
     return this.albumService.deletePhoto(req.user.userId, id, deletePhoto);
   }
 }

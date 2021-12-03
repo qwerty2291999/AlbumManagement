@@ -4,3 +4,6 @@ export interface AddUser {
   id: number;
   uid: number;
 }
+export interface Message {
+  message: string;
+}
